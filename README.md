@@ -1,0 +1,2 @@
+# memoRaxis_HippoRAG
+这个项目致力于将HippoRAG的代码整合进memoRaxis
