@@ -25,6 +25,8 @@ class AdaptorResult:
     token_consumption: int = 0
     replan_count: int = 0
     evidence_collected: List[Evidence] = field(default_factory=list)
+    token_breakdown: Dict[str, int] = field(default_factory=dict)
+    api_call_count: int = 0
 
 
 class BaseAdaptor(ABC):
@@ -90,6 +92,9 @@ class SingleTurnAdaptor(BaseAdaptor):
         """
         self._logger.info("[SingleTurn] 开始处理任务: %s", task)
 
+        if hasattr(self._llm, "reset_stats"):
+            self._llm.reset_stats()
+
         # 步骤 1: 检索
         evidences = self._memory.retrieve(task, top_k=top_k)
         self._log_evidences(evidences, "[SingleTurn]")
@@ -101,7 +106,7 @@ class SingleTurnAdaptor(BaseAdaptor):
         answer = self._llm.generate(prompt)
 
         # 获取 Token 统计（如果 LLM 客户端支持）
-        token_consumption = getattr(self._llm, "total_tokens", 0)
+        token_consumption = getattr(self._llm, "session_tokens", getattr(self._llm, "total_tokens", 0))
 
         self._logger.info("[SingleTurn] 任务完成")
 
@@ -110,6 +115,8 @@ class SingleTurnAdaptor(BaseAdaptor):
             steps_taken=1,
             token_consumption=token_consumption,
             evidence_collected=evidences,
+            token_breakdown={"infer": token_consumption},
+            api_call_count=1,
         )
 
 
@@ -144,6 +151,9 @@ class IterativeAdaptor(BaseAdaptor):
             AdaptorResult
         """
         self._logger.info("[Iterative] 开始处理任务: %s", task)
+
+        if hasattr(self._llm, "reset_stats"):
+            self._llm.reset_stats()
 
         all_evidences: List[Evidence] = []
         previous_queries: List[str] = []
@@ -185,7 +195,7 @@ class IterativeAdaptor(BaseAdaptor):
         )
         answer = self._llm.generate(synthesis_prompt)
 
-        token_consumption = getattr(self._llm, "total_tokens", 0)
+        token_consumption = getattr(self._llm, "session_tokens", getattr(self._llm, "total_tokens", 0))
 
         self._logger.info("[Iterative] 任务完成，共 %d 步", steps)
 
@@ -194,6 +204,8 @@ class IterativeAdaptor(BaseAdaptor):
             steps_taken=steps,
             token_consumption=token_consumption,
             evidence_collected=all_evidences,
+            token_breakdown={"infer": token_consumption},
+            api_call_count=steps + 1,
         )
 
 
@@ -234,6 +246,9 @@ class PlanAndActAdaptor(BaseAdaptor):
             AdaptorResult
         """
         self._logger.info("[PlanAndAct] 开始处理任务: %s", task)
+
+        if hasattr(self._llm, "reset_stats"):
+            self._llm.reset_stats()
 
         all_evidences: List[Evidence] = []
         executed_steps: List[Dict[str, Any]] = []
@@ -327,7 +342,7 @@ class PlanAndActAdaptor(BaseAdaptor):
         )
         answer = self._llm.generate(synthesis_prompt)
 
-        token_consumption = getattr(self._llm, "total_tokens", 0)
+        token_consumption = getattr(self._llm, "session_tokens", getattr(self._llm, "total_tokens", 0))
 
         self._logger.info(
             "[PlanAndAct] 任务完成，共 %d 步，补充 %d 次", steps, additions_count
@@ -339,6 +354,8 @@ class PlanAndActAdaptor(BaseAdaptor):
             token_consumption=token_consumption,
             replan_count=additions_count,
             evidence_collected=all_evidences,
+            token_breakdown={"infer": token_consumption},
+            api_call_count=steps + 3,
         )
 
     def _generate_discovery_step(self, task: str) -> Dict[str, Any]:

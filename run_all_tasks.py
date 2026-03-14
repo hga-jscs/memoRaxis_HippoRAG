@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import List
 
@@ -93,6 +94,7 @@ def ingest_acc(
     openie_mode: str,
     force_rebuild: bool,
     max_chunks: int,
+    run_id: str,
 ) -> None:
     cmd = [
         python_exe,
@@ -107,6 +109,8 @@ def ingest_acc(
         openie_mode,
         "--max_chunks",
         str(max_chunks),
+        "--run_id",
+        run_id,
     ]
     if force_rebuild:
         cmd.append("--force_rebuild")
@@ -121,6 +125,7 @@ def infer_acc(
     index_root: str,
     output_suffix: str,
     openie_mode: str,
+    run_id: str,
 ) -> None:
     cmd = [
         python_exe,
@@ -137,6 +142,8 @@ def infer_acc(
         output_suffix,
         "--openie_mode",
         openie_mode,
+        "--run_id",
+        run_id,
     ]
     run_cmd(cmd)
 
@@ -175,6 +182,7 @@ def ingest_conflict(
     openie_mode: str,
     force_rebuild: bool,
     max_chunks: int,
+    run_id: str,
 ) -> None:
     cmd = [
         python_exe,
@@ -189,6 +197,8 @@ def ingest_conflict(
         openie_mode,
         "--max_chunks",
         str(max_chunks),
+        "--run_id",
+        run_id,
     ]
     if force_rebuild:
         cmd.append("--force_rebuild")
@@ -243,6 +253,7 @@ def ingest_long(
     openie_mode: str,
     force_rebuild: bool,
     max_chunks: int,
+    run_id: str,
 ) -> None:
     cmd = [
         python_exe,
@@ -259,6 +270,8 @@ def ingest_long(
         openie_mode,
         "--max_chunks",
         str(max_chunks),
+        "--run_id",
+        run_id,
     ]
     if force_rebuild:
         cmd.append("--force_rebuild")
@@ -323,6 +336,7 @@ def ingest_ttl(
     openie_mode: str,
     force_rebuild: bool,
     max_chunks: int,
+    run_id: str,
 ) -> None:
     cmd = [
         python_exe,
@@ -335,6 +349,8 @@ def ingest_ttl(
         openie_mode,
         "--max_chunks",
         str(max_chunks),
+        "--run_id",
+        run_id,
     ]
     if force_rebuild:
         cmd.append("--force_rebuild")
@@ -425,6 +441,8 @@ def main() -> None:
     parser.add_argument("--ttl_limit", type=int, default=-1)
     parser.add_argument("--ttl_max_chunks", type=int, default=-1)
 
+    parser.add_argument("--run_id", type=str, default="", help="实验运行 ID，用于 token 追踪")
+
     parser.add_argument("--skip_preprocess", action="store_true")
     parser.add_argument("--skip_ingest", action="store_true")
     parser.add_argument("--skip_infer", action="store_true")
@@ -433,6 +451,7 @@ def main() -> None:
     args = parser.parse_args()
 
     python_exe = sys.executable
+    run_id = args.run_id or uuid.uuid4().hex[:12]
 
     config_path = PROJECT_ROOT / "config" / "config.yaml"
     ensure_exists(config_path, "配置文件")
@@ -450,6 +469,7 @@ def main() -> None:
                 openie_mode=args.openie_mode,
                 force_rebuild=args.force_rebuild,
                 max_chunks=args.acc_max_chunks,
+                run_id=run_id,
             )
         if not args.skip_infer:
             infer_acc(
@@ -460,6 +480,7 @@ def main() -> None:
                 index_root=args.index_root,
                 output_suffix=args.output_suffix,
                 openie_mode=args.openie_mode,
+                run_id=run_id,
             )
         if not args.skip_eval:
             eval_acc(
@@ -478,6 +499,7 @@ def main() -> None:
                 openie_mode=args.openie_mode,
                 force_rebuild=args.force_rebuild,
                 max_chunks=args.conflict_max_chunks,
+                run_id=run_id,
             )
         if not args.skip_infer:
             infer_conflict(
@@ -502,6 +524,7 @@ def main() -> None:
                 openie_mode=args.openie_mode,
                 force_rebuild=args.force_rebuild,
                 max_chunks=args.long_max_chunks,
+                run_id=run_id,
             )
         if not args.skip_infer:
             infer_long(
@@ -529,6 +552,7 @@ def main() -> None:
                 openie_mode=args.openie_mode,
                 force_rebuild=args.force_rebuild,
                 max_chunks=args.ttl_max_chunks,
+                run_id=run_id,
             )
         if not args.skip_infer:
             infer_ttl(
