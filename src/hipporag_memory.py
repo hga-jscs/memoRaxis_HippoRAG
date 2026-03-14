@@ -22,6 +22,7 @@ from typing import Any, Dict, List
 from .config import get_config
 from .logger import get_logger
 from .memory_interface import BaseMemorySystem, Evidence
+from .token_tracker import get_global_tracker
 
 
 logger = get_logger()
@@ -172,7 +173,12 @@ class HippoRAGMemory(BaseMemorySystem):
             return
 
         self._logger.info("[HippoRAGMemory] Building index with %d chunks -> %s", len(self._buffer), self.index_dir)
-        self._hippo.index(self._buffer)
+        tracker = get_global_tracker()
+        if tracker:
+            with tracker.scope(stage="ingest", substage="hipporag_index"):
+                self._hippo.index(self._buffer)
+        else:
+            self._hippo.index(self._buffer)
         self._logger.info("[HippoRAGMemory] Index build done.")
 
     def retrieve(self, query: str, top_k: int = 5) -> List[Evidence]:
@@ -181,11 +187,20 @@ class HippoRAGMemory(BaseMemorySystem):
         if not query:
             return []
 
+        tracker = get_global_tracker()
         try:
-            out = self._hippo.retrieve([query], num_to_retrieve=k)
+            if tracker:
+                with tracker.scope(stage="infer", substage="hipporag_retrieve"):
+                    out = self._hippo.retrieve([query], num_to_retrieve=k)
+            else:
+                out = self._hippo.retrieve([query], num_to_retrieve=k)
         except TypeError:
             # 兼容 HippoRAG 可能的参数签名变化
-            out = self._hippo.retrieve([query], k)
+            if tracker:
+                with tracker.scope(stage="infer", substage="hipporag_retrieve"):
+                    out = self._hippo.retrieve([query], k)
+            else:
+                out = self._hippo.retrieve([query], k)
 
         # retrieve 可能返回 solutions 或 (solutions, meta)
         if isinstance(out, tuple) and len(out) == 2:

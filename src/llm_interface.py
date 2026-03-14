@@ -67,15 +67,28 @@ class OpenAIClient(BaseLLMClient):
         self._temperature = temperature
         self._max_tokens = max_tokens
         self._total_tokens = 0
+        self._session_tokens = 0
+        self._last_usage: Optional[Dict[str, int]] = None
 
     @property
     def total_tokens(self) -> int:
         """返回 Token 消耗 (估算或从 API 返回获取)"""
         return self._total_tokens
 
+    @property
+    def session_tokens(self) -> int:
+        """返回当前会话 Token 消耗"""
+        return self._session_tokens
+
+    @property
+    def last_usage(self) -> Optional[Dict[str, int]]:
+        """返回最近一次 API usage"""
+        return self._last_usage
+
     def reset_stats(self) -> None:
         """重置统计"""
-        self._total_tokens = 0
+        self._session_tokens = 0
+        self._last_usage = None
 
     def generate(self, prompt: str, **kwargs) -> str:
         """调用 OpenAI 生成文本"""
@@ -90,8 +103,20 @@ class OpenAIClient(BaseLLMClient):
             
             content = response.choices[0].message.content
             
-            if response.usage:
-                self._total_tokens += response.usage.total_tokens
+            usage = getattr(response, "usage", None)
+            if usage:
+                prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+                completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+                total_tokens = int(
+                    getattr(usage, "total_tokens", prompt_tokens + completion_tokens) or 0
+                )
+                self._last_usage = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                }
+                self._total_tokens += total_tokens
+                self._session_tokens += total_tokens
                 
             return content
         except Exception as e:
