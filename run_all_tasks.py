@@ -212,6 +212,7 @@ def infer_conflict(
     limit: int,
     index_root: str,
     openie_mode: str,
+    run_id: str,
 ) -> None:
     # Conflict 官方评测脚本更适合匹配默认文件名，因此这里强制不加 suffix
     cmd = [
@@ -229,6 +230,8 @@ def infer_conflict(
         "",
         "--openie_mode",
         openie_mode,
+        "--run_id",
+        run_id,
     ]
     run_cmd(cmd)
 
@@ -286,6 +289,7 @@ def infer_long(
     index_root: str,
     output_suffix: str,
     openie_mode: str,
+    run_id: str,
 ) -> None:
     cmd = [
         python_exe,
@@ -302,6 +306,8 @@ def infer_long(
         output_suffix,
         "--openie_mode",
         openie_mode,
+        "--run_id",
+        run_id,
     ]
     run_cmd(cmd)
 
@@ -310,6 +316,7 @@ def eval_long(
     python_exe: str,
     instance_idx: str,
     output_suffix: str,
+    run_id: str,
 ) -> None:
     for idx in parse_indices(instance_idx):
         result_file = PROJECT_ROOT / "out" / f"long_range_results_{idx}{'_' + output_suffix if output_suffix else ''}.json"
@@ -322,6 +329,8 @@ def eval_long(
             str(result_file),
             "--instance_folder",
             "MemoryAgentBench/preview_samples/Long_Range_Understanding",
+            "--run_id",
+            run_id,
         ]
         run_cmd(cmd)
 
@@ -365,6 +374,7 @@ def infer_ttl(
     index_root: str,
     output_suffix: str,
     openie_mode: str,
+    run_id: str,
 ) -> None:
     cmd = [
         python_exe,
@@ -381,6 +391,8 @@ def infer_ttl(
         output_suffix,
         "--openie_mode",
         openie_mode,
+        "--run_id",
+        run_id,
     ]
     run_cmd(cmd)
 
@@ -452,6 +464,7 @@ def main() -> None:
 
     python_exe = sys.executable
     run_id = args.run_id or uuid.uuid4().hex[:12]
+    print(f"[run_all_tasks] Using shared run_id={run_id}")
 
     config_path = PROJECT_ROOT / "config" / "config.yaml"
     ensure_exists(config_path, "配置文件")
@@ -509,6 +522,7 @@ def main() -> None:
                 limit=args.conflict_limit,
                 index_root=args.index_root,
                 openie_mode=args.openie_mode,
+                run_id=run_id,
             )
         if not args.skip_eval:
             eval_conflict(python_exe=python_exe)
@@ -535,12 +549,14 @@ def main() -> None:
                 index_root=args.index_root,
                 output_suffix=args.output_suffix,
                 openie_mode=args.openie_mode,
+                run_id=run_id,
             )
         if not args.skip_eval:
             eval_long(
                 python_exe=python_exe,
                 instance_idx=args.long_instance_idx,
                 output_suffix=args.output_suffix,
+                run_id=run_id,
             )
 
     if "ttl" in args.tasks:
@@ -563,6 +579,7 @@ def main() -> None:
                 index_root=args.index_root,
                 output_suffix=args.output_suffix,
                 openie_mode=args.openie_mode,
+                run_id=run_id,
             )
         if not args.skip_eval:
             eval_ttl(

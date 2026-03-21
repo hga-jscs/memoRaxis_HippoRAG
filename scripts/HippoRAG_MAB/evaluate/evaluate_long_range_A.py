@@ -1,20 +1,20 @@
-
-import json
 import argparse
-import logging
-import re
+import json
+import sys
 from pathlib import Path
-from typing import List, Dict, Any
-import numpy as np
+from typing import List
 
-# 复用项目现有的基础设施
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.append(str(PROJECT_ROOT))
+
 from src.logger import get_logger
 from src.config import get_config
 from src.llm_interface import OpenAIClient
+from src.openai_usage_patch import install_openai_usage_patch
+from src.token_tracker import TokenTracker, set_global_tracker
 
 logger = get_logger()
 
-# --- 官方 PROMPTS (直接复用) ---
 FLUENCY_PROMPT = """Please act as an impartial judge and evaluate the fluency of the provided text. The text should be coherent, non-repetitive, fluent, and grammatically correct.
 
 Below is your grading rubric:
@@ -55,13 +55,14 @@ Expert summary: <start of summary>{expert_summary}<end of summary>
 Provided summary: <start of summary>{summary}<end of summary>
 """
 
+
 class SummarizationJudge:
     def __init__(self):
         conf = get_config()
         self.llm = OpenAIClient(
             api_key=conf.llm["api_key"],
             base_url=conf.llm["base_url"],
-            model=conf.llm["model"]
+            model=conf.llm["model"],
         )
 
     def judge_fluency(self, text: str) -> int:
@@ -80,47 +81,77 @@ class SummarizationJudge:
         res = self.llm.generate_json(prompt)
         return int(res.get("precision", 0)), int(res.get("sentence_count", 1))
 
+
 def main():
     parser = argparse.ArgumentParser(description="LRU-A Summarization Evaluator")
     parser.add_argument("--results", type=str, required=True, help="Path to infer results JSON")
     parser.add_argument("--instance_folder", type=str, default="MemoryAgentBench/preview_samples/Long_Range_Understanding")
+    parser.add_argument("--run_id", type=str, default="", help="Token tracking run id")
     args = parser.parse_args()
 
-    with open(args.results, 'r', encoding='utf-8') as f:
+    with open(args.results, "r", encoding="utf-8") as f:
         results_data = json.load(f)
+
+    tracker = TokenTracker(run_id=args.run_id or results_data.get("run_id") or None)
+    set_global_tracker(tracker)
+    install_openai_usage_patch()
+    logger.info(f"[TokenTracker] run_id={tracker.run_id} trace={tracker.path}")
 
     instance_idx = results_data["instance_idx"]
     instance_path = Path(args.instance_folder) / f"instance_{instance_idx}.json"
-    
-    with open(instance_path, 'r', encoding='utf-8') as f:
+    with open(instance_path, "r", encoding="utf-8") as f:
         ground_truth = json.load(f)
 
-    # 提取评测所需的 GT 信息
     keypoints = ground_truth["metadata"].get("keypoints", [])
     expert_summary = ground_truth["answers"][0] if ground_truth["answers"] else ""
 
     judge = SummarizationJudge()
-    
     final_eval = {
         "dataset": "LRU-A",
         "instance_idx": instance_idx,
-        "metrics": {}
+        "run_id": tracker.run_id,
+        "token_trace": str(tracker.path),
+        "metrics": {},
     }
 
-    for adaptor_name, predictions in results_data['results'].items():
-        logger.info(f"Judging {adaptor_name}...")
-        
-        # LRU-A 每本书只有一个问题
-        if not predictions: continue
+    for adaptor_name, predictions in results_data["results"].items():
+        logger.info(f"Judging {adaptor_name} with run_id={tracker.run_id}...")
+        if not predictions:
+            continue
+
         pred_item = predictions[0]
-        prediction = pred_item["answer"]
+        prediction = pred_item.get("answer", "")
+        if not prediction:
+            logger.warning(f"[{adaptor_name}] Empty prediction, skip judge")
+            continue
 
-        # 评分
-        f_score = judge.judge_fluency(prediction)
-        r_found = judge.judge_recall(prediction, keypoints)
-        p_found, p_total = judge.judge_precision(prediction, expert_summary)
+        with tracker.scope(
+            dataset="Long_Range_Understanding",
+            instance_idx=instance_idx,
+            adaptor=adaptor_name,
+            stage="evaluate",
+            substage="fluency",
+        ):
+            f_score = judge.judge_fluency(prediction)
 
-        # 计算比例
+        with tracker.scope(
+            dataset="Long_Range_Understanding",
+            instance_idx=instance_idx,
+            adaptor=adaptor_name,
+            stage="evaluate",
+            substage="recall",
+        ):
+            r_found = judge.judge_recall(prediction, keypoints)
+
+        with tracker.scope(
+            dataset="Long_Range_Understanding",
+            instance_idx=instance_idx,
+            adaptor=adaptor_name,
+            stage="evaluate",
+            substage="precision",
+        ):
+            p_found, p_total = judge.judge_precision(prediction, expert_summary)
+
         recall = r_found / len(keypoints) if keypoints else 0
         precision = p_found / p_total if p_total > 0 else 0
         f1 = f_score * 2 * (recall * precision) / (recall + precision) if (recall + precision) > 0 else 0
@@ -134,20 +165,22 @@ def main():
                 "recall_found": r_found,
                 "recall_total": len(keypoints),
                 "precision_found": p_found,
-                "precision_total": p_total
-            }
+                "precision_total": p_total,
+            },
         }
-        logger.info(f"[{adaptor_name}] F1: {f1:.4f}")
+        logger.info(
+            f"[{adaptor_name}] fluency={f_score} recall={recall:.4f} precision={precision:.4f} f1={f1:.4f}"
+        )
 
-    # 保存结果
     output_dir = Path("out/eval")
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / f"eval_lru_a_{instance_idx}.json"
-    
-    with open(output_file, 'w', encoding='utf-8') as f:
+
+    with open(output_file, "w", encoding="utf-8") as f:
         json.dump(final_eval, f, indent=2, ensure_ascii=False)
 
     print(f"\nLRU-A Evaluation Report for Instance {instance_idx} saved to {output_file}")
+
 
 if __name__ == "__main__":
     main()
